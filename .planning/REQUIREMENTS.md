@@ -31,7 +31,7 @@
 - [x] **PLAT-01**: All API endpoints require `X-API-Key` header authentication; requests without a valid key receive 401; key configured via environment variable
 - [x] **PLAT-02**: Service emits structured JSON logs (via structlog) including `run_id`, `step_name`, and `correlation_id` on all workflow execution log lines
 - [x] **PLAT-03**: `GET /health` returns service status, SQLite reachability, and service version; returns 200 on healthy, 503 on DB unreachable
-- [ ] **PLAT-04**: Service ships with a single-worker Dockerfile and docker-compose.yml for local development; SQLite data persisted via named Docker volume
+- [x] **PLAT-04**: Service ships with a single-worker Dockerfile and docker-compose.yml for local development; SQLite data persisted via named Docker volume
 
 ## v2 Requirements (Deferred)
 
@@ -72,4 +72,4 @@
 | PLAT-01 | Phase 1 | Complete |
 | PLAT-02 | Phase 1 | Complete |
 | PLAT-03 | Phase 1 | Complete |
-| PLAT-04 | Phase 4 | Pending |
+| PLAT-04 | Phase 4 | Complete |
