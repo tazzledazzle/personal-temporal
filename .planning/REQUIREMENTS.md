@@ -55,10 +55,21 @@
 
 ## Traceability
 
-| Requirement | Phase | Notes |
-|-------------|-------|-------|
-| DEFN-01, DEFN-02, DEFN-03 | — | TBD by roadmapper |
-| EXEC-01, EXEC-02, EXEC-03 | — | TBD by roadmapper |
-| COMP-01, COMP-02 | — | TBD by roadmapper |
-| RESIL-01, RESIL-02, RESIL-03, RESIL-04 | — | TBD by roadmapper |
-| PLAT-01, PLAT-02, PLAT-03, PLAT-04 | — | TBD by roadmapper |
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| DEFN-01 | Phase 1 | Pending |
+| DEFN-02 | Phase 1 | Pending |
+| DEFN-03 | Phase 1 | Pending |
+| EXEC-01 | Phase 2 | Pending |
+| EXEC-02 | Phase 2 | Pending |
+| EXEC-03 | Phase 2 | Pending |
+| COMP-01 | Phase 3 | Pending |
+| COMP-02 | Phase 3 | Pending |
+| RESIL-01 | Phase 2 | Pending |
+| RESIL-02 | Phase 2 | Pending |
+| RESIL-03 | Phase 2 | Pending |
+| RESIL-04 | Phase 1 | Pending |
+| PLAT-01 | Phase 1 | Pending |
+| PLAT-02 | Phase 1 | Pending |
+| PLAT-03 | Phase 1 | Pending |
+| PLAT-04 | Phase 4 | Pending |
