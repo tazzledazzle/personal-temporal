@@ -6,10 +6,13 @@ These fixtures import from app.* which does not yet exist — intentional RED ga
 ImportError on collection is the expected Wave 1 state.
 """
 
+import os
+import tempfile
+
 import pytest
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool
 from httpx import AsyncClient, ASGITransport
 
 from app.main import app
@@ -21,14 +24,24 @@ TEST_API_KEY = "test-api-key"
 @pytest.fixture
 async def db_session():
     """
-    Create an in-memory SQLite engine using StaticPool so all async calls share
-    one connection. Registers WAL and busy_timeout PRAGMAs via the sync_engine
-    connection event — same as production setup.
+    Create a temp-file SQLite engine with NullPool so WAL mode is honoured.
+
+    SQLite in-memory databases always report journal_mode='memory' and ignore
+    the PRAGMA journal_mode=WAL directive — WAL requires a file.  Using a
+    NamedTemporaryFile gives us a real on-disk database for the test session
+    while keeping it isolated (the file is deleted in cleanup).
+
+    PRAGMAs are registered via event.listens_for(engine.sync_engine, "connect")
+    — the same pattern as production.
     """
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp.close()
+    db_url = f"sqlite+aiosqlite:///{tmp.name}"
+
     engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
+        db_url,
         connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+        poolclass=NullPool,
     )
 
     @event.listens_for(engine.sync_engine, "connect")
@@ -50,6 +63,7 @@ async def db_session():
         yield session
 
     await engine.dispose()
+    os.unlink(tmp.name)
 
 
 @pytest.fixture
