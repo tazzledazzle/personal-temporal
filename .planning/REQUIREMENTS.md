@@ -16,8 +16,8 @@
 
 ### Compensation (Saga Pattern)
 
-- [ ] **COMP-01**: When any step fails (non-2xx response or timeout), the executor automatically calls each previously-completed step's `compensate_url` in reverse order (LIFO); steps with no `compensate_url` are silently skipped; compensation continues even if individual compensate calls fail
-- [ ] **COMP-02**: Per-step compensation outcome is recorded in history: `compensated_at` on success, `compensation_error` on failure; final run status reflects whether compensation fully succeeded
+- [x] **COMP-01**: When any step fails (non-2xx response or timeout), the executor automatically calls each previously-completed step's `compensate_url` in reverse order (LIFO); steps with no `compensate_url` are silently skipped; compensation continues even if individual compensate calls fail
+- [x] **COMP-02**: Per-step compensation outcome is recorded in history: `compensated_at` on success, `compensation_error` on failure; final run status reflects whether compensation fully succeeded
 
 ### Resilience
 
@@ -63,8 +63,8 @@
 | EXEC-01 | Phase 2 | Pending |
 | EXEC-02 | Phase 2 | Pending |
 | EXEC-03 | Phase 2 | Pending |
-| COMP-01 | Phase 3 | Pending |
-| COMP-02 | Phase 3 | Pending |
+| COMP-01 | Phase 3 | Complete |
+| COMP-02 | Phase 3 | Complete |
 | RESIL-01 | Phase 2 | Complete |
 | RESIL-02 | Phase 2 | Pending |
 | RESIL-03 | Phase 2 | Pending |

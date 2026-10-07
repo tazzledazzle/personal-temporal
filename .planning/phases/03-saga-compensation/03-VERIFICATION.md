@@ -1,101 +1,42 @@
 ---
 phase: 03-saga-compensation
-verified: 2026-10-07T00:00:00Z
-status: gaps_found
-score: 1/4 must-haves verified
+verified: 2026-10-07T12:00:00Z
+status: passed
+score: 4/4 must-haves verified
 overrides_applied: 0
-gaps:
-  - truth: "When any step fails, the executor automatically compensates all previously-completed steps in strict reverse-completion order"
-    status: failed
-    reason: "app/runs/compensator.py does not exist. CompensationCoordinator is not implemented. executor.py has no compensation logic — on step failure it sets run.status='FAILED' and returns immediately with no compensate_url calls."
-    artifacts:
-      - path: "app/runs/compensator.py"
-        issue: "MISSING — module does not exist"
-      - path: "app/runs/executor.py"
-        issue: "Exits on step failure (line 101: return) with no compensation call chain"
-    missing:
-      - "Create app/runs/compensator.py with CompensationCoordinator class implementing LIFO compensate_url dispatch"
-      - "Wire CompensationCoordinator into executor.py execute_run on step failure path"
-
-  - truth: "Compensation continues even if individual compensate calls fail"
-    status: failed
-    reason: "No compensation implementation exists. The continue-on-failure behavior is not present in any module."
-    artifacts:
-      - path: "app/runs/compensator.py"
-        issue: "MISSING"
-    missing:
-      - "CompensationCoordinator must catch per-step compensation errors, record them, and continue to the next step"
-
-  - truth: "All outcomes are recorded per-step (compensated_at on success, compensation_error on failure, final run status COMPENSATED or COMPENSATION_FAILED)"
-    status: failed
-    reason: "ORM model columns exist (compensation_status, compensated_at, compensation_error in models.py lines 60-62) but are never written. StepExecutionResponse schema (app/runs/schemas.py) does not expose these fields — they are omitted from API responses. Run status values COMPENSATED and COMPENSATION_FAILED are referenced only in a notin_() filter in workflows/repository.py and are never set by any executor logic."
-    artifacts:
-      - path: "app/runs/schemas.py"
-        issue: "StepExecutionResponse missing compensation_status, compensated_at, compensation_error fields — Pydantic will silently drop ORM values; tests will raise KeyError"
-      - path: "app/runs/executor.py"
-        issue: "Never writes to compensation_status, compensated_at, or compensation_error columns; never sets run.status to COMPENSATED or COMPENSATION_FAILED"
-    missing:
-      - "Add compensation_status, compensated_at, compensation_error to StepExecutionResponse in app/runs/schemas.py"
-      - "Set run.status to COMPENSATED or COMPENSATION_FAILED after compensation chain completes"
-
-  - truth: "6 compensation tests in tests/test_compensation.py import and pass against a real CompensationCoordinator"
-    status: failed
-    reason: "tests/test_compensation.py exists with 6 real test functions and 6 async with respx.mock: blocks (Wave 1 RED gate is complete and verified). However, the tests fail at collection time with ModuleNotFoundError: No module named 'app.runs.compensator'. They cannot pass until Wave 2 (implementation) is complete."
-    artifacts:
-      - path: "tests/test_compensation.py"
-        issue: "File is substantive (not a stub) — 6 real assertions with proper respx patterns. But all 6 tests error at pytest collection; none pass."
-    missing:
-      - "Implement Wave 2: app/runs/compensator.py, executor.py update, schemas.py update"
+re_verification:
+  previous_status: gaps_found
+  previous_score: 0/4
+  gaps_closed:
+    - "When any step fails, the executor automatically compensates all previously-completed steps in strict reverse-completion order"
+    - "Compensation continues even if individual compensate calls fail"
+    - "All outcomes are recorded per-step (compensated_at on success, compensation_error on failure, final run status COMPENSATED or COMPENSATION_FAILED)"
+    - "6 compensation tests in tests/test_compensation.py import and pass against a real CompensationCoordinator"
+  gaps_remaining: []
+  regressions: []
 ---
 
 # Phase 03: Saga Compensation — Verification Report
 
 **Phase Goal:** When any step fails, the executor automatically compensates all previously-completed steps in strict reverse-completion order; compensation continues even if individual compensate calls fail; all outcomes are recorded per-step.
-**Verified:** 2026-10-07
-**Status:** GAPS FOUND
-**Re-verification:** No — initial verification
-
----
-
-## Context: Two-Wave Phase, One Wave Complete
-
-Phase 3 was designed as a two-wave TDD cycle. Wave 1 (RED gate) is the only plan written and executed.
-Wave 2 (GREEN gate — implementation) has not been planned or executed.
-
-- Wave 1 complete: `tests/test_compensation.py` exists with 6 failing tests (RED gate confirmed)
-- Wave 2 absent: `app/runs/compensator.py` does not exist; `executor.py` has no compensation logic
-
-The ROADMAP.md progress table marks Phase 3 as "Complete (2026-10-07)" — this is incorrect. The phase
-goal requires observable behavior in the running service, not only a test file.
+**Verified:** 2026-10-07T12:00:00Z
+**Status:** PASSED
+**Re-verification:** Yes — after gap closure (Wave 2 GREEN gate)
 
 ---
 
 ## Goal Achievement
 
-### Observable Truths (Phase Goal — Roadmap Success Criteria)
+### Observable Truths (ROADMAP Phase 3 Success Criteria)
 
 | # | Truth | Status | Evidence |
-|---|-------|--------|---------|
-| 1 | `GET /runs/{run_id}/steps` shows previously-completed steps' compensate_url called in LIFO order when any step fails | FAILED | executor.py exits on failure (line 101 `return`) with no compensate_url dispatch; compensator module is absent |
-| 2 | A 5xx compensation response does not stop the remaining compensation chain | FAILED | No compensation chain exists anywhere in the codebase |
-| 3 | `GET /runs/{run_id}/steps` records `compensated_at` and `compensation_error` per step | FAILED | ORM columns exist but are never written; schema response excludes them |
-| 4 | `GET /runs/{run_id}` shows `COMPENSATED` or `COMPENSATION_FAILED` based on outcome | FAILED | These status values exist only in a notin_() filter (workflows/repository.py:64); never assigned |
+|---|-------|--------|----------|
+| 1 | `GET /runs/{run_id}/steps` shows previously-completed steps' compensate_url called in LIFO order when any step fails; steps with no compensate_url silently skipped | VERIFIED | `compensator.py` L43-66: queries COMPLETED steps ordered by `completed_at.desc()`; skips when `workflow_step is None or not workflow_step.compensate_url`; `test_compensation_lifo_order` and `test_compensation_skips_steps_without_compensate_url` both pass |
+| 2 | A 5xx or timeout compensation response does not stop the remaining compensation chain | VERIFIED | `compensator.py` L86-89: broad `except Exception` inside per-step loop sets `compensation_status = "FAILED"` then continues (never breaks or re-raises); `test_compensation_continues_on_failure` passes |
+| 3 | `GET /runs/{run_id}/steps` records `compensated_at` for each successfully-compensated step and `compensation_error` for any failed compensation | VERIFIED | `compensator.py` L79-89: writes `compensation_status`, `compensated_at`, `compensation_error` per step; `schemas.py` L29-31: `StepExecutionResponse` exposes all three fields; `test_compensation_called_on_step_failure` and `test_compensation_continues_on_failure` both pass |
+| 4 | `GET /runs/{run_id}` shows `COMPENSATED` when all compensations succeed and `COMPENSATION_FAILED` when one or more fail | VERIFIED | `compensator.py` L99-103: `run.status = "COMPENSATION_FAILED" if any_failed else "COMPENSATED"`; `test_run_status_compensated_when_all_succeed` and `test_run_status_compensation_failed_on_partial` both pass |
 
-**Score: 0/4 roadmap truths verified**
-
-### Plan Frontmatter Must-Haves (Wave 1 RED Gate Truths)
-
-These truths are scoped to Wave 1 only. They do NOT cover the phase goal — they confirm only that
-the RED gate was correctly committed.
-
-| # | Truth | Status | Evidence |
-|---|-------|--------|---------|
-| 1 | `pytest tests/test_compensation.py --collect-only` exits with ImportError (RED gate confirmed) | VERIFIED | Confirmed: `ModuleNotFoundError: No module named 'app.runs.compensator'` — exit code 1 |
-| 2 | `tests/test_compensation.py` exists with 6 real assertions — not empty stubs | VERIFIED | File exists, 159 lines, 6 test functions each with real assertions against compensation_status, compensated_at, compensation_error, run status |
-| 3 | All tests use `async with respx.mock:` context manager (not @respx.mock decorator) | VERIFIED | `grep -c 'async with respx.mock'` → 6 |
-| 4 | LIFO order test captures call_order via side_effect callbacks | VERIFIED | Lines 63-82: two async side_effect functions record to call_order list |
-
-**Wave 1 score: 4/4 — RED gate is complete and correctly structured**
+**Score: 4/4 truths verified**
 
 ---
 
@@ -103,10 +44,10 @@ the RED gate was correctly committed.
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `tests/test_compensation.py` | RED gate: 6 failing tests importing CompensationCoordinator | VERIFIED | Exists, 159 lines, 6 test functions, correct import at line 15 |
-| `app/runs/compensator.py` | CompensationCoordinator: LIFO dispatch, continue-on-failure, outcome recording | MISSING | File does not exist — `ls app/runs/` confirms absence |
-| `app/runs/executor.py` (updated) | Calls CompensationCoordinator on step failure instead of returning | STUB | Exists but compensation call absent; step failure path exits at line 101 with no rollback |
-| `app/runs/schemas.py` (updated) | StepExecutionResponse includes compensation_status, compensated_at, compensation_error | MISSING | Three fields absent from schema; ORM values would be silently dropped by Pydantic |
+| `app/runs/compensator.py` | CompensationCoordinator: LIFO dispatch, continue-on-failure, outcome recording | VERIFIED | 107 lines; class exports `CompensationCoordinator`; constructor takes `session` + `http_client`; `compensate()` is async; uses `_write_lock` 4 times; `completed_at.desc()` ordering; 0 self-owned session factories |
+| `app/runs/executor.py` | Both failure branches (non-2xx + timeout) invoke CompensationCoordinator | VERIFIED | L26: `from app.runs.compensator import CompensationCoordinator`; L102: non-2xx call; L113: timeout call; both followed by `return` |
+| `app/runs/schemas.py` | StepExecutionResponse exposes compensation_status, compensated_at, compensation_error | VERIFIED | L29-31: all three fields declared as `str | None` or `datetime | None`; `model_config = {"from_attributes": True}` handles ORM mapping |
+| `tests/test_compensation.py` | 6 substantive tests that now pass GREEN | VERIFIED | 6 test functions, 6 `async with respx.mock:` blocks, real assertions; all pass |
 
 ---
 
@@ -114,19 +55,20 @@ the RED gate was correctly committed.
 
 | From | To | Via | Status | Details |
 |------|----|-----|--------|---------|
-| `tests/test_compensation.py` | `app.runs.compensator` | `from app.runs.compensator import CompensationCoordinator` | NOT_WIRED | Import produces ModuleNotFoundError; RED gate intentional |
-| `app/runs/executor.py` | `app.runs.compensator` | CompensationCoordinator call on step failure | NOT_WIRED | No import or call of any compensation module in executor.py |
-| `app/runs/executor.py` | run.status = "COMPENSATED" / "COMPENSATION_FAILED" | Direct assignment after compensation chain | NOT_WIRED | Only "FAILED" and "COMPLETED" are ever assigned in executor.py |
-| `app/runs/schemas.py` | `WorkflowStepExecution` compensation columns | Field declarations in StepExecutionResponse | NOT_WIRED | Three ORM columns exist in models.py but have no matching schema fields |
+| `app/runs/executor.py` | `app/runs/compensator.py` | `CompensationCoordinator(session, http_client).compensate(run)` | WIRED | Import at L26; 2 call sites (L102, L113) with live session and http_client objects |
+| `app/runs/compensator.py` | `app/workflows/models.py WorkflowStep` | `select(WorkflowStep).where(... step_order == step_exec.step_index)` | WIRED | L58-63; looks up `compensate_url` per step via step_order |
+| `app/runs/schemas.py StepExecutionResponse` | `app/runs/models.py WorkflowStepExecution` | `model_config = {"from_attributes": True}` + declared fields | WIRED | All three compensation columns mapped automatically; verified by `python -c` import check |
+| `tests/test_compensation.py` | `app.runs.compensator` | `from app.runs.compensator import CompensationCoordinator` | WIRED | Module now exists; import succeeds; collection succeeds |
 
 ---
 
 ## Data-Flow Trace (Level 4)
 
-Not applicable — no compensation data flows at all. The `compensation_status`, `compensated_at`,
-and `compensation_error` ORM columns exist in `app/runs/models.py` (lines 60-62) and are correctly
-defined, but no code path ever writes to them. The `StepExecutionResponse` schema does not include
-them, so even if they were written they would not reach the API consumer.
+| Artifact | Data Variable | Source | Produces Real Data | Status |
+|----------|---------------|--------|--------------------|--------|
+| `compensator.py` | `step_exec.compensation_status` | SQLAlchemy ORM attribute set in compensation loop (L79, L83, L87) | Yes — written per-step inside `_write_lock` then committed | FLOWING |
+| `compensator.py` | `run.status` | Computed from `attempted_steps` list: `"COMPENSATION_FAILED" if any_failed else "COMPENSATED"` (L103) | Yes — only when at least one compensate_url was attempted | FLOWING |
+| `schemas.py StepExecutionResponse` | `compensation_status`, `compensated_at`, `compensation_error` | ORM-mapped from `WorkflowStepExecution` via `from_attributes=True` | Yes — values written by compensator are returned through GET /runs/{id}/steps | FLOWING |
 
 ---
 
@@ -134,22 +76,19 @@ them, so even if they were written they would not reach the API consumer.
 
 | Behavior | Command | Result | Status |
 |----------|---------|--------|--------|
-| pytest RED gate confirmed | `pytest tests/test_compensation.py --collect-only` | exit 1, ModuleNotFoundError | PASS (RED gate correct) |
-| Existing 20 tests unaffected | `pytest tests/ --ignore=tests/test_compensation.py -x -q` | 20 passed, exit 0 | PASS |
-| Compensation tests pass | `pytest tests/test_compensation.py -q` | Cannot run — collection fails | FAIL |
+| All 6 compensation tests pass | `python -m pytest tests/test_compensation.py -q` | 6 passed, 0 failed | PASS |
+| Full suite (26 tests) passes | `python -m pytest tests/ -q` | 26 passed, 134 warnings, 0 failed | PASS |
+| CompensationCoordinator importable with correct signature | `python -c "from app.runs.compensator import CompensationCoordinator; ..."` | OK | PASS |
+| StepExecutionResponse has compensation fields | `python -c "from app.runs.schemas import StepExecutionResponse; ..."` | OK: all 3 fields present | PASS |
 
 ---
 
 ## Requirements Coverage
 
 | Requirement | Description | Status | Evidence |
-|-------------|-------------|--------|---------|
-| COMP-01 | When any step fails, executor calls each previously-completed step's compensate_url in reverse order; no compensate_url steps silently skipped; continues on individual failure | BLOCKED | executor.py has no compensate_url dispatch logic; compensator module absent |
-| COMP-02 | Per-step compensation outcome recorded; final run status reflects whether compensation succeeded | BLOCKED | ORM columns exist but never written; schema excludes them; COMPENSATED/COMPENSATION_FAILED never set |
-
-Both requirements declared in PLAN frontmatter are BLOCKED. REQUIREMENTS.md marks both as
-"Complete" in the traceability table — this is premature. The checkboxes at lines 19-20 of
-REQUIREMENTS.md mark COMP-01 and COMP-02 complete, but no implementation supports them.
+|-------------|-------------|--------|----------|
+| COMP-01 | Step failure triggers LIFO compensate_url dispatch; steps without compensate_url silently skipped; chain continues on individual failure | SATISFIED | `compensator.py` implements all three behaviors; 4 of 6 compensation tests directly verify COMP-01 behaviors; all pass |
+| COMP-02 | Per-step compensation outcome recorded (compensated_at, compensation_error); final run status reflects aggregate outcome (COMPENSATED / COMPENSATION_FAILED) | SATISFIED | Per-step writes in `compensator.py` L79-89; run status set at L103; schema exposes fields at L29-31; 2 of 6 compensation tests directly verify COMP-02 behaviors; all pass |
 
 ---
 
@@ -157,47 +96,30 @@ REQUIREMENTS.md mark COMP-01 and COMP-02 complete, but no implementation support
 
 | File | Line | Pattern | Severity | Impact |
 |------|------|---------|----------|--------|
-| `app/runs/executor.py` | 101 | `return` on step failure with no compensation call | BLOCKER | Phase goal not achievable until this branch invokes compensation |
-| `app/runs/schemas.py` | — | Compensation fields absent from StepExecutionResponse | BLOCKER | Tests will raise KeyError even after compensator is implemented |
-| `.planning/ROADMAP.md` | 19 | Phase 3 marked `[x]` Complete (2026-10-07) | WARNING | Phase goal not achieved; marking it complete is misleading |
-| `.planning/REQUIREMENTS.md` | 19-20 | COMP-01 and COMP-02 marked `[x]` complete | WARNING | Traceability table is incorrect; requirements not yet satisfied |
+| `app/runs/executor.py` | 84, 108+ | `datetime.utcnow()` — deprecated in Python 3.12 | INFO | Deprecation warning only; 134 warnings in test run are all this pattern; no behavioral impact; pre-existing across codebase |
+
+No TBD, FIXME, or XXX debt markers found in any phase-modified file.
 
 ---
 
 ## Human Verification Required
 
-None. All gaps are programmatically observable (missing files, missing schema fields, absent
-executor logic).
+None. All success criteria are programmatically observable through the test suite and static analysis.
 
 ---
 
-## Gaps Summary
+## Re-Verification Summary
 
-Phase 3 has two waves. Wave 1 (TDD RED gate) is complete and correctly implemented:
-`tests/test_compensation.py` exists with 6 substantive test functions, all using
-`async with respx.mock:`, and pytest confirms the expected `ModuleNotFoundError` at collection.
+All 4 gaps from the initial verification (2026-10-07) are closed:
 
-Wave 2 (implementation) has not been planned or executed. Three categories of work are missing:
+1. **`app/runs/compensator.py` (MISSING → VERIFIED):** `CompensationCoordinator` created with dependency-injected session + http_client, LIFO ordering by `completed_at.desc()`, continue-on-failure loop, per-step outcome writes, aggregate run status setting.
+2. **`app/runs/executor.py` (STUB → VERIFIED):** Both failure branches (non-2xx L91-103, timeout L104-114) now invoke `CompensationCoordinator(session, http_client).compensate(run)` before returning. The live session and http_client objects are reused — conftest.py patching continues to work.
+3. **`app/runs/schemas.py` (MISSING FIELDS → VERIFIED):** `StepExecutionResponse` extended with `compensation_status`, `compensated_at`, `compensation_error` at L29-31; `from_attributes=True` maps ORM values automatically.
+4. **Test suite (FAILING → PASSING):** `pytest tests/ -q` exits 0 with 26 passed (6 new compensation tests + 20 pre-existing).
 
-**1. Compensator module absent**
-`app/runs/compensator.py` does not exist. `CompensationCoordinator` (or equivalent) must be
-created implementing: LIFO iteration over completed steps, per-step HTTP POST to compensate_url,
-continue-on-failure error handling, and per-step outcome recording.
-
-**2. Executor not updated**
-`executor.py` returns immediately on step failure (line 101) with `run.status = "FAILED"`.
-It must instead call the compensator, then set `run.status` to `COMPENSATED` or
-`COMPENSATION_FAILED` based on the compensation chain result.
-
-**3. Schema fields missing**
-`StepExecutionResponse` in `app/runs/schemas.py` has no `compensation_status`, `compensated_at`,
-or `compensation_error` fields. Without these, compensation results written by the compensator
-would be silently dropped by Pydantic and tests would raise KeyError.
-
-The root cause is a single missing wave. All four roadmap success criteria fail from the same
-source: the GREEN gate wave was never planned or executed.
+No regressions detected. Pre-existing 20 tests continue to pass.
 
 ---
 
-_Verified: 2026-10-07_
+_Verified: 2026-10-07T12:00:00Z_
 _Verifier: Claude (gsd-verifier)_
