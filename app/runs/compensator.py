@@ -52,6 +52,7 @@ class CompensationCoordinator:
         step_execs = (await self.session.execute(stmt)).scalars().all()
 
         # 2. Process each completed step in LIFO order.
+        attempted_steps: list[WorkflowStepExecution] = []
         for step_exec in step_execs:
             # Look up the workflow step definition to get compensate_url.
             ws_stmt = select(WorkflowStep).where(
@@ -64,6 +65,9 @@ class CompensationCoordinator:
             # Skip if no workflow step or no compensate_url defined.
             if workflow_step is None or not workflow_step.compensate_url:
                 continue
+
+            # Track that this step was actually attempted.
+            attempted_steps.append(step_exec)
 
             # Attempt to call the compensate_url.
             try:
@@ -89,10 +93,14 @@ class CompensationCoordinator:
                 await self.session.commit()
 
         # 3. Set aggregate run status based on per-step outcomes.
-        any_failed = any(
-            se.compensation_status == "FAILED" for se in step_execs
-        )
-        run.status = "COMPENSATION_FAILED" if any_failed else "COMPENSATED"
-        run.completed_at = datetime.utcnow()
-        async with _write_lock:
-            await self.session.commit()
+        # Only transition run.status when at least one compensate_url was attempted.
+        # When no steps had compensate_urls (e.g. workflow has no compensate_urls
+        # defined), leave run.status as FAILED so existing semantics are preserved.
+        if attempted_steps:
+            any_failed = any(
+                se.compensation_status == "FAILED" for se in attempted_steps
+            )
+            run.status = "COMPENSATION_FAILED" if any_failed else "COMPENSATED"
+            run.completed_at = datetime.utcnow()
+            async with _write_lock:
+                await self.session.commit()
