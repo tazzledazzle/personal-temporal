@@ -25,7 +25,8 @@ Built as an interview showcase demonstrating systems design depth: durable state
 
 ### Validated
 
-(None yet — ship to validate)
+- [x] On step failure, compensate all previously-completed steps in reverse order — Validated in Phase 03: saga-compensation
+- [x] Query step execution history with compensation outcomes (status, timestamps, errors) — Validated in Phase 03: saga-compensation
 
 ### Active
 
@@ -75,4 +76,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-07 after initialization*
+*Last updated: 2026-10-07 after Phase 03 (saga-compensation) complete*
