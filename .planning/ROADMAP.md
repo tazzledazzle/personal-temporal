@@ -16,7 +16,7 @@
 
 - [ ] **Phase 1: Foundation & Persistence** - Async DB engine, WAL config, workflow definition CRUD, auth, health, structlog, test harness
 - [ ] **Phase 2: Execution Engine** - Happy-path run execution, per-step HTTP dispatch, run/step query endpoints, timeouts, retry schema
-- [x] **Phase 3: Saga Compensation** - CompensationCoordinator, LIFO reverse-order compensation, continue-on-failure, per-step compensation recording (completed 2026-10-07)
+- [ ] **Phase 3: Saga Compensation** - CompensationCoordinator, LIFO reverse-order compensation, continue-on-failure, per-step compensation recording
 - [ ] **Phase 4: Containerization & Integration Tests** - Dockerfile, docker-compose with named volume, end-to-end integration test suite
 
 ---
