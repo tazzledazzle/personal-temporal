@@ -16,7 +16,7 @@
 
 - [ ] **Phase 1: Foundation & Persistence** - Async DB engine, WAL config, workflow definition CRUD, auth, health, structlog, test harness
 - [ ] **Phase 2: Execution Engine** - Happy-path run execution, per-step HTTP dispatch, run/step query endpoints, timeouts, retry schema
-- [ ] **Phase 3: Saga Compensation** - CompensationCoordinator, LIFO reverse-order compensation, continue-on-failure, per-step compensation recording
+- [x] **Phase 3: Saga Compensation** - CompensationCoordinator, LIFO reverse-order compensation, continue-on-failure, per-step compensation recording (completed 2026-10-07)
 - [ ] **Phase 4: Containerization & Integration Tests** - Dockerfile, docker-compose with named volume, end-to-end integration test suite
 
 ---
@@ -39,20 +39,24 @@
 Plans:
 - [x] 01-01-PLAN.md — Wave 1 (RED): pyproject.toml + test harness stubs (all 5 test files, conftest.py)
 - [x] 01-02-PLAN.md — Wave 2 (GREEN): Core infrastructure scaffold (engine, auth, logging, health, Docker)
-- [ ] 01-03-PLAN.md — Wave 3 (GREEN+REFACTOR): Workflow CRUD (models, schemas, repository, router)
+- [x] 01-03-PLAN.md — Wave 3 (GREEN+REFACTOR): Workflow CRUD (models, schemas, repository, router)
 
 ### Phase 2: Execution Engine
 **Goal**: Clients can start a workflow run and immediately receive a run ID; the executor drives each step's HTTP call in order, persists every state transition before dispatch, and exposes run status and step history via query endpoints.
 **Mode:** mvp
 **Depends on**: Phase 1
-**Requirements**: EXEC-01, EXEC-02, EXEC-03, RESIL-02, RESIL-03
+**Requirements**: EXEC-01, EXEC-02, EXEC-03, RESIL-01, RESIL-02, RESIL-03
 **Success Criteria** (what must be TRUE):
   1. `POST /workflows/{name}/runs` returns 202 with a `run_id` immediately; the run transitions from `PENDING` to `RUNNING` to `COMPLETED` in the background when all steps respond 2xx.
   2. `GET /runs/{run_id}` returns current status, current step index, input payload, `started_at`, `completed_at`, and error detail; a query issued before the background task finishes reflects the live intermediate state.
   3. `GET /runs/{run_id}/steps` returns an append-only history entry for each step including `status`, `started_at`, `completed_at`, HTTP response code, and `error_detail`.
   4. A step whose HTTP call exceeds `timeout_seconds` (or the service-level default) fails with a timeout error visible in the step history; the run transitions to a terminal failure state.
   5. After a process restart, all completed runs and their full step histories remain queryable without data loss.
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [x] 02-01-PLAN.md — Wave 1 (RED): respx dev dep + test_runs.py stubs
+- [x] 02-02-PLAN.md — Wave 2 (GREEN): WorkflowRun+StepExecution models, executor, router, wiring
 
 ### Phase 3: Saga Compensation
 **Goal**: When any step fails, the executor automatically compensates all previously-completed steps in strict reverse-completion order; compensation continues even if individual compensate calls fail; all outcomes are recorded per-step.
@@ -85,7 +89,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Foundation & Persistence | 2/3 | In Progress|  |
 | 2. Execution Engine | 0/? | Not started | - |
-| 3. Saga Compensation | 0/? | Not started | - |
+| 3. Saga Compensation | 1/1 | Complete   | 2026-10-07 |
 | 4. Containerization & Integration Tests | 0/? | Not started | - |
 
 ---
