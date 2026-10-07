@@ -37,7 +37,7 @@
 **Plans**: 3 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Wave 1 (RED): pyproject.toml + test harness stubs (all 5 test files, conftest.py)
+- [x] 01-01-PLAN.md — Wave 1 (RED): pyproject.toml + test harness stubs (all 5 test files, conftest.py)
 - [ ] 01-02-PLAN.md — Wave 2 (GREEN): Core infrastructure scaffold (engine, auth, logging, health, Docker)
 - [ ] 01-03-PLAN.md — Wave 3 (GREEN+REFACTOR): Workflow CRUD (models, schemas, repository, router)
 
@@ -83,7 +83,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation & Persistence | 0/3 | Not started | - |
+| 1. Foundation & Persistence | 1/3 | In Progress|  |
 | 2. Execution Engine | 0/? | Not started | - |
 | 3. Saga Compensation | 0/? | Not started | - |
 | 4. Containerization & Integration Tests | 0/? | Not started | - |

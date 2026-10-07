@@ -4,9 +4,9 @@
 
 ### Workflow Definitions
 
-- [ ] **DEFN-01**: User can register a named workflow definition with an ordered list of steps, where each step specifies `name`, `execute_url`, optional `compensate_url`, optional `timeout_seconds`, and optional `retry_policy` (schema only; enforcement deferred to v2)
-- [ ] **DEFN-02**: User can retrieve a single workflow definition by name and list all registered definitions
-- [ ] **DEFN-03**: User can delete a workflow definition by name; deletion is rejected if any active (non-terminal) runs exist for that workflow
+- [x] **DEFN-01**: User can register a named workflow definition with an ordered list of steps, where each step specifies `name`, `execute_url`, optional `compensate_url`, optional `timeout_seconds`, and optional `retry_policy` (schema only; enforcement deferred to v2)
+- [x] **DEFN-02**: User can retrieve a single workflow definition by name and list all registered definitions
+- [x] **DEFN-03**: User can delete a workflow definition by name; deletion is rejected if any active (non-terminal) runs exist for that workflow
 
 ### Execution
 
@@ -24,13 +24,13 @@
 - [ ] **RESIL-01**: Workflow run state is durably persisted to SQLite; process restarts do not lose run history; previously-completed runs are queryable after restart
 - [ ] **RESIL-02**: Each step call enforces a configurable timeout (`timeout_seconds` from step definition, with a service-level default); steps that exceed the timeout fail with a timeout error and trigger compensation
 - [ ] **RESIL-03**: Step definition includes a `retry_policy` schema (`max_attempts`, `backoff_seconds`, `max_delay_seconds`); schema is stored and returned in API responses (enforcement of multi-attempt retry logic is deferred to v2)
-- [ ] **RESIL-04**: Multiple workflow runs execute concurrently without state corruption; concurrent writes are serialized via `asyncio.Lock` + SQLite WAL mode + optimistic locking (`version` column) to prevent lost updates
+- [x] **RESIL-04**: Multiple workflow runs execute concurrently without state corruption; concurrent writes are serialized via `asyncio.Lock` + SQLite WAL mode + optimistic locking (`version` column) to prevent lost updates
 
 ### Platform
 
-- [ ] **PLAT-01**: All API endpoints require `X-API-Key` header authentication; requests without a valid key receive 401; key configured via environment variable
-- [ ] **PLAT-02**: Service emits structured JSON logs (via structlog) including `run_id`, `step_name`, and `correlation_id` on all workflow execution log lines
-- [ ] **PLAT-03**: `GET /health` returns service status, SQLite reachability, and service version; returns 200 on healthy, 503 on DB unreachable
+- [x] **PLAT-01**: All API endpoints require `X-API-Key` header authentication; requests without a valid key receive 401; key configured via environment variable
+- [x] **PLAT-02**: Service emits structured JSON logs (via structlog) including `run_id`, `step_name`, and `correlation_id` on all workflow execution log lines
+- [x] **PLAT-03**: `GET /health` returns service status, SQLite reachability, and service version; returns 200 on healthy, 503 on DB unreachable
 - [ ] **PLAT-04**: Service ships with a single-worker Dockerfile and docker-compose.yml for local development; SQLite data persisted via named Docker volume
 
 ## v2 Requirements (Deferred)
@@ -57,9 +57,9 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DEFN-01 | Phase 1 | Pending |
-| DEFN-02 | Phase 1 | Pending |
-| DEFN-03 | Phase 1 | Pending |
+| DEFN-01 | Phase 1 | Complete |
+| DEFN-02 | Phase 1 | Complete |
+| DEFN-03 | Phase 1 | Complete |
 | EXEC-01 | Phase 2 | Pending |
 | EXEC-02 | Phase 2 | Pending |
 | EXEC-03 | Phase 2 | Pending |
@@ -68,8 +68,8 @@
 | RESIL-01 | Phase 2 | Pending |
 | RESIL-02 | Phase 2 | Pending |
 | RESIL-03 | Phase 2 | Pending |
-| RESIL-04 | Phase 1 | Pending |
-| PLAT-01 | Phase 1 | Pending |
-| PLAT-02 | Phase 1 | Pending |
-| PLAT-03 | Phase 1 | Pending |
+| RESIL-04 | Phase 1 | Complete |
+| PLAT-01 | Phase 1 | Complete |
+| PLAT-02 | Phase 1 | Complete |
+| PLAT-03 | Phase 1 | Complete |
 | PLAT-04 | Phase 4 | Pending |
