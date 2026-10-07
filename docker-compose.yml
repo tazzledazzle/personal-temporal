@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - db_data:/app/data
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/workflows.db
+      - API_KEY=change-me-in-production
+      - LOG_JSON=true
+
+volumes:
+  db_data:    # named volume — data survives container restarts (T-1-03)
