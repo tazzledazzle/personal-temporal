@@ -34,7 +34,12 @@
   3. `DELETE /workflows/{name}` returns 204 when no active runs exist for that workflow, and 409 when active runs are present.
   4. `GET /health` returns 200 with SQLite reachability status when the DB is up, and 503 when the DB is unreachable.
   5. After a process restart, all previously-registered definitions are queryable without data loss; structured JSON log lines for each request include a `correlation_id` field.
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Wave 1 (RED): pyproject.toml + test harness stubs (all 5 test files, conftest.py)
+- [ ] 01-02-PLAN.md — Wave 2 (GREEN): Core infrastructure scaffold (engine, auth, logging, health, Docker)
+- [ ] 01-03-PLAN.md — Wave 3 (GREEN+REFACTOR): Workflow CRUD (models, schemas, repository, router)
 
 ### Phase 2: Execution Engine
 **Goal**: Clients can start a workflow run and immediately receive a run ID; the executor drives each step's HTTP call in order, persists every state transition before dispatch, and exposes run status and step history via query endpoints.
@@ -78,7 +83,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation & Persistence | 0/? | Not started | - |
+| 1. Foundation & Persistence | 0/3 | Not started | - |
 | 2. Execution Engine | 0/? | Not started | - |
 | 3. Saga Compensation | 0/? | Not started | - |
 | 4. Containerization & Integration Tests | 0/? | Not started | - |
@@ -110,3 +115,4 @@ Total mapped: 16/16 ✓
 
 ---
 *Created: 2026-10-07*
+*Updated: 2026-10-07 — Phase 1 planned (3 plans, 3 waves)*
