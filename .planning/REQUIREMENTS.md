@@ -21,7 +21,7 @@
 
 ### Resilience
 
-- [ ] **RESIL-01**: Workflow run state is durably persisted to SQLite; process restarts do not lose run history; previously-completed runs are queryable after restart
+- [x] **RESIL-01**: Workflow run state is durably persisted to SQLite; process restarts do not lose run history; previously-completed runs are queryable after restart
 - [ ] **RESIL-02**: Each step call enforces a configurable timeout (`timeout_seconds` from step definition, with a service-level default); steps that exceed the timeout fail with a timeout error and trigger compensation
 - [ ] **RESIL-03**: Step definition includes a `retry_policy` schema (`max_attempts`, `backoff_seconds`, `max_delay_seconds`); schema is stored and returned in API responses (enforcement of multi-attempt retry logic is deferred to v2)
 - [x] **RESIL-04**: Multiple workflow runs execute concurrently without state corruption; concurrent writes are serialized via `asyncio.Lock` + SQLite WAL mode + optimistic locking (`version` column) to prevent lost updates
@@ -65,7 +65,7 @@
 | EXEC-03 | Phase 2 | Pending |
 | COMP-01 | Phase 3 | Pending |
 | COMP-02 | Phase 3 | Pending |
-| RESIL-01 | Phase 2 | Pending |
+| RESIL-01 | Phase 2 | Complete |
 | RESIL-02 | Phase 2 | Pending |
 | RESIL-03 | Phase 2 | Pending |
 | RESIL-04 | Phase 1 | Complete |
