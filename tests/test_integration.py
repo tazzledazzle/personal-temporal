@@ -15,9 +15,6 @@ import asyncio
 import os
 import tempfile
 
-# Set API_KEY BEFORE any app imports so pydantic-settings picks it up
-os.environ.setdefault("API_KEY", "integration-test-key")
-
 import httpx
 import pytest
 import respx
@@ -35,7 +32,7 @@ from app.main import app
 # Constants
 # ---------------------------------------------------------------------------
 
-INT_API_KEY = "integration-test-key"
+INT_API_KEY = "test-api-key"  # matches .env (same key conftest.py uses)
 TERMINAL_STATES = {"COMPLETED", "FAILED", "COMPENSATED", "COMPENSATION_FAILED"}
 
 
@@ -84,7 +81,7 @@ async def integration_client(integration_engine):
     1. app.dependency_overrides[get_db] — routes request-scoped sessions to the test DB
     2. executor_module.AsyncSessionLocal — routes the background executor to the test DB
     """
-    get_settings.cache_clear()  # force re-read so INT_API_KEY is picked up
+    get_settings.cache_clear()
 
     TestSession = async_sessionmaker(
         bind=integration_engine,
@@ -109,6 +106,7 @@ async def integration_client(integration_engine):
 
     app.dependency_overrides.clear()
     executor_module.AsyncSessionLocal = original_factory
+    get_settings.cache_clear()  # prevent settings pollution for subsequent test modules
 
 
 # ---------------------------------------------------------------------------
