@@ -2,14 +2,17 @@
 phase: 03-saga-compensation
 reviewed: 2026-10-07T00:00:00Z
 depth: standard
-files_reviewed: 1
+files_reviewed: 4
 files_reviewed_list:
   - tests/test_compensation.py
+  - app/runs/compensator.py
+  - app/runs/executor.py
+  - app/runs/schemas.py
 findings:
-  critical: 2
-  warning: 3
-  info: 1
-  total: 6
+  critical: 3
+  warning: 5
+  info: 2
+  total: 10
 status: issues_found
 ---
 
@@ -17,104 +20,223 @@ status: issues_found
 
 **Reviewed:** 2026-10-07
 **Depth:** standard
-**Files Reviewed:** 1
+**Files Reviewed:** 4
 **Status:** issues_found
 
 ## Summary
 
-`tests/test_compensation.py` is a test suite for saga compensation behavior that does not yet have a corresponding implementation (`app/runs/compensator.py` and `CompensationCoordinator` are missing). The tests are well-structured and the intentions are clear, but several defects make the suite unreliable or incorrect as written:
+Reviewed the full saga compensation implementation: `CompensationCoordinator` (compensator.py), the `execute_run` background task (executor.py), run/step response schemas (schemas.py), and the compensation test suite (test_compensation.py).
 
-1. Two tests query the database **outside** the `respx.mock` context manager, which means those queries go to the live test DB session — but they do so after the mock context has exited. If background tasks complete inside the `async with respx.mock:` block (as the comment at lines 8–11 asserts), reading state after the block is correct for compensation status — but the `run_id` is extracted inside the block while the `steps_response` fetch runs outside it. For the GET endpoints this is fine since they hit the local ASGI app, but the pattern is inconsistent across tests and fragile.
-2. The critical problem: `respx.mock` intercepts `httpx.AsyncClient` calls at the library level, but `executor.py` creates its own `httpx.AsyncClient()` instance inside `execute_run` (line 60). `respx.mock` as a context manager uses `respx.mock` (the global router), which patches the default httpx transport globally when used as a context manager via `respx.mock` — this **does** intercept all httpx calls including those from the executor's own client. However, the scope mismatch between where `respx.mock` is entered and when the background task actually fires is the real bug (see CR-01).
-3. `StepExecutionResponse` schema (in `app/runs/schemas.py`) is missing the three compensation fields (`compensation_status`, `compensation_error`, `compensated_at`) that the tests assert on. The tests will raise `KeyError` at runtime even if compensation runs correctly.
-4. The workflow `POST /workflows` in every test uses `await client.post("/workflows", json=COMP_WORKFLOW)` without checking the response — a duplicate-workflow insert on the second test that reuses the same `"name": "comp-wf"` may 409 or silently succeed depending on the implementation.
+The overall architecture is sound — LIFO ordering, continue-on-failure semantics, dependency-injected HTTP client and session, and the persist-before-dispatch invariant are all correctly implemented in intent. However, three critical defects were found:
+
+1. `execute_run` does not catch `httpx.RequestError` (network failures) — only `TimeoutException` is caught. Any DNS failure, connection refused, or protocol error leaves the run stuck in `RUNNING` permanently, bypassing compensation entirely.
+2. The `compensate()` final commit that sets `run.status = COMPENSATED` is not guarded against exceptions. A DB write failure here silently leaves the run stuck as `FAILED` with no signal to the caller, even though per-step compensation may have already been applied and committed.
+3. `WorkflowRun.status` column comment and `RunResponse` schema do not enumerate `COMPENSATED` and `COMPENSATION_FAILED` as valid states, creating a self-contradictory schema contract and no Pydantic-level enforcement.
+
+Five warnings cover: deprecated `datetime.utcnow()` used throughout, unasserted workflow-registration responses in every test, a dead `step_c` variable with no assertion, a fragile LIFO-order test that does not guard against empty `call_order`, and `run.completed_at` being committed twice (once in executor, once in compensator) with no comment explaining the intentional override.
 
 ---
 
 ## Critical Issues
 
-### CR-01: respx mock scope does not cover background task execution — tests will pass vacuously or raise UnroutableError
+### CR-01: `httpx.RequestError` not caught in `execute_run` — network failures leave run stuck in RUNNING permanently
 
-**File:** `tests/test_compensation.py:43-54` (and all other `async with respx.mock:` blocks)
+**File:** `app/runs/executor.py:104`
 
-**Issue:** The `async with respx.mock:` context manager patches httpx transports while the block is entered, then restores them when the block exits. `BackgroundTasks` in FastAPI with `ASGITransport` are awaited synchronously inside `await client.post(...)` — the ASGI lifecycle does run background tasks before the response is returned to the test — **but only if the implementation uses the patched `AsyncSessionLocal`**. The executor creates `httpx.AsyncClient()` inside `execute_run`. `respx.mock` as an `async with` context manager uses `respx.mock` (global router) and patches `httpx.AsyncClient` globally while active, so the transport interception does cover in-background-task calls as long as the background task completes before `__aexit__`.
-
-The **actual** bug is that `test_compensation_called_on_step_failure` (and `test_run_status_compensated_when_all_succeed`) register the workflow with `await client.post("/workflows", json=COMP_WORKFLOW)` **outside** the `async with respx.mock:` block, then open the mock block and start the run. At that point the respx mock is active and will intercept executor calls. This is correct. However, the GET calls to `/runs/{run_id}/steps` and `/runs/{run_id}` are made **inside** the mock block — these hit the ASGI app which queries SQLite, not an HTTP endpoint respx is intercepting. Since respx by default uses `assert_all_called=True` in some configurations and the mock routes are not scoped, any unexpected httpx call from within the mock block (e.g., if the compensator also uses httpx internally and is called during the GET handler) would raise. More critically: if `app/runs/compensator.py` does **not** exist, the import at line 15 (`from app.runs.compensator import CompensationCoordinator`) will raise `ModuleNotFoundError` at collection time, and **all six tests will be skipped/errored with a collection failure** rather than failing individually. This is effectively a blocker for the entire test file.
-
-**Fix:** The import guard should be conditional or the module must be created before these tests are collected. For now, add a skip marker or move the import inside the test function body until the implementation exists. Once implemented, verify the compensator is wired into `execute_run` or the router so background task execution actually triggers it:
+**Issue:** The `try/except` block at lines 78–113 of `executor.py` only catches `httpx.TimeoutException`. The broader `httpx.RequestError` class covers all transport-level failures: `ConnectError` (connection refused, DNS failure), `RemoteProtocolError`, `ReadError`, `WriteError`, and others. If a step's `execute_url` is unreachable for any reason other than a timeout, the exception propagates out of the `for step in wf.steps:` loop, out of the `async with httpx.AsyncClient():` block, and out of `execute_run` entirely. FastAPI's `BackgroundTasks` runner catches and swallows this exception silently. The run remains in `RUNNING` status with `current_step_index` pointing to the failed step. No compensation is triggered. The caller polling `GET /runs/{run_id}` sees `RUNNING` indefinitely.
 
 ```python
-# Option A — guard the import so the rest of the suite isn't blocked:
-try:
-    from app.runs.compensator import CompensationCoordinator
-except ImportError:
-    CompensationCoordinator = None  # type: ignore
-
-# ... then in each test:
-if CompensationCoordinator is None:
-    pytest.skip("CompensationCoordinator not implemented yet")
+# executor.py — only TimeoutException is caught, leaving ConnectError etc. unhandled:
+except httpx.TimeoutException:
+    ...
+    await CompensationCoordinator(session, http_client).compensate(run)
+    return
+# httpx.ConnectError, httpx.RemoteProtocolError, etc. are NOT caught here
 ```
 
-Or create the module as a stub immediately so pytest can collect it.
+**Fix:** Add `httpx.RequestError` as a second except clause (or broaden the existing one):
+
+```python
+except httpx.TimeoutException:
+    error_msg = f"Timeout after {timeout}s"
+    async with _write_lock:
+        step_exec.status = "FAILED"
+        step_exec.error_detail = error_msg
+        step_exec.completed_at = datetime.utcnow()
+        run.status = "FAILED"
+        run.error_detail = f"Step '{step.name}' {error_msg}"
+        run.completed_at = datetime.utcnow()
+        await session.commit()
+    await CompensationCoordinator(session, http_client).compensate(run)
+    return
+except httpx.RequestError as exc:
+    error_msg = f"Network error: {exc.__class__.__name__}: {exc}"
+    async with _write_lock:
+        step_exec.status = "FAILED"
+        step_exec.error_detail = error_msg[:500]
+        step_exec.completed_at = datetime.utcnow()
+        run.status = "FAILED"
+        run.error_detail = f"Step '{step.name}' {error_msg[:500]}"
+        run.completed_at = datetime.utcnow()
+        await session.commit()
+    await CompensationCoordinator(session, http_client).compensate(run)
+    return
+```
 
 ---
 
-### CR-02: StepExecutionResponse schema missing compensation fields — tests will raise KeyError
+### CR-02: `compensate()` final run-status commit is unguarded — DB write failure leaves run stuck as FAILED with partial compensation silently applied
 
-**File:** `tests/test_compensation.py:51-55, 98-103, 119-126`
+**File:** `app/runs/compensator.py:99-106`, `app/runs/executor.py:102,113`
 
-**Issue:** Every test that calls `GET /runs/{run_id}/steps` and inspects compensation results does so by accessing `s["compensation_status"]`, `s["compensated_at"]`, and `s["compensation_error"]` on the response JSON. The `StepExecutionResponse` Pydantic schema in `app/runs/schemas.py:20-29` has **no** fields for these three attributes. Even though the ORM model (`WorkflowStepExecution`) defines them at lines 60-62, Pydantic will silently drop unknown model attributes when serializing via `model_validate` with `from_attributes=True`. The response JSON will therefore lack these keys, and `s["compensation_status"]` will raise `KeyError`, making every compensation assertion fail at the wrong layer.
-
-**Fix:** Add the three fields to `StepExecutionResponse`:
+**Issue:** Inside `compensate()`, per-step compensation outcomes are committed one at a time (lines 92–93) — these individual commits persist partial progress. The final commit at lines 105–106 sets `run.status = COMPENSATED` or `COMPENSATION_FAILED`. If this final commit raises `SQLAlchemyError` (e.g., disk full, lock contention), the exception propagates up to the `execute_run` call site at line 102 (or 113) of `executor.py`. There is no `try/except` wrapping either `compensate()` call in `executor.py`:
 
 ```python
-class StepExecutionResponse(BaseModel):
+# executor.py:102 — no exception handling:
+await CompensationCoordinator(session, http_client).compensate(run)
+return
+```
+
+The `BackgroundTask` runner swallows the unhandled exception. The result: the run remains with `status = FAILED` and some/all steps show `compensation_status = COMPLETED` — an inconsistent state with no recovery path. A caller querying `GET /runs/{id}` cannot distinguish "compensation never triggered" from "compensation applied but final status write failed."
+
+**Fix:** Wrap both `compensate()` call sites in `executor.py` with a broad handler that logs without re-raising:
+
+```python
+try:
+    await CompensationCoordinator(session, http_client).compensate(run)
+except Exception as exc:
+    import structlog
+    log = structlog.get_logger()
+    log.error(
+        "compensation_error",
+        run_id=run_id,
+        error=str(exc),
+        error_type=type(exc).__name__,
+    )
+return
+```
+
+Additionally, wrap the final commit inside `compensate()` to prevent the unhandled-exception scenario:
+
+```python
+try:
+    async with _write_lock:
+        await self.session.commit()
+except Exception as exc:
+    # Per-step commits already persisted; log the aggregate-status failure
+    # so operators know the run is in a partial state.
+    raise  # let executor's try/except log it
+```
+
+---
+
+### CR-03: `WorkflowRun.status` comment and `RunResponse` schema omit `COMPENSATED` / `COMPENSATION_FAILED` — schema contract is self-contradictory
+
+**File:** `app/runs/models.py:24`, `app/runs/schemas.py:35-52`
+
+**Issue:** `WorkflowRun.status` is documented in a comment as `# PENDING | RUNNING | COMPLETED | FAILED`. `CompensationCoordinator` writes two additional values — `COMPENSATED` and `COMPENSATION_FAILED` — that are not listed. Any developer reading the model believes only four states exist. `RunResponse.status` is typed as `str` with no constraint, so Pydantic will serialize any string from the DB column without validation. If an operator or downstream consumer builds a state machine against the documented four states, they will encounter unhandled values at runtime.
+
+**Fix — models.py:**
+
+```python
+# PENDING | RUNNING | COMPLETED | FAILED | COMPENSATED | COMPENSATION_FAILED
+status: Mapped[str] = mapped_column(String, nullable=False, default="PENDING")
+```
+
+**Fix — schemas.py (add enum constraint):**
+
+```python
+from typing import Literal
+
+class RunResponse(BaseModel):
     id: str
-    step_index: int
-    step_name: str
-    status: str
+    workflow_def_id: str
+    status: Literal[
+        "PENDING", "RUNNING", "COMPLETED", "FAILED",
+        "COMPENSATED", "COMPENSATION_FAILED",
+    ]
+    current_step_index: int
+    input_payload: dict | str | None
     started_at: datetime | None
     completed_at: datetime | None
-    http_status_code: int | None
     error_detail: str | None
-    # Phase 3 compensation fields
-    compensation_status: str | None = None
-    compensated_at: datetime | None = None
-    compensation_error: str | None = None
     model_config = {"from_attributes": True}
+
+    @field_validator("input_payload", mode="before")
+    @classmethod
+    def parse_input_payload(cls, v: Any) -> dict | None:
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
 ```
 
 ---
 
 ## Warnings
 
-### WR-01: Workflow registration not isolated between tests — second test using same workflow name may 409 or silently collide
+### WR-01: `datetime.utcnow()` is deprecated since Python 3.12 — used throughout executor and compensator
 
-**File:** `tests/test_compensation.py:42, 60, 87, 108, 130, 146`
+**File:** `app/runs/compensator.py:80,84,89,104` and `app/runs/executor.py:58,88,95,100,108,110,119`
 
-**Issue:** Every test calls `await client.post("/workflows", json=COMP_WORKFLOW)` where `COMP_WORKFLOW` has `"name": "comp-wf"`. Each test uses the same `client` fixture, but `client` depends on `test_engine` which is a **function-scoped** fixture (pytest-asyncio defaults to function scope). Since `test_engine` creates a fresh DB per test, isolation is provided by the fixture scope. However, if the fixture scope were ever changed to `session` or `module`, all tests would break with duplicate-key errors. More immediately, the lack of response-checking means a `409 Conflict` (if the workflow endpoint returns one) would go undetected and the subsequent `POST /workflows/comp-wf/runs` would either 404 or use a stale definition. This should be asserted.
+**Issue:** `datetime.utcnow()` returns a naive (timezone-unaware) datetime and is formally deprecated in Python 3.12. The project targets Python 3.11+ but the deprecation warning is visible in 3.12 logs and the pattern produces naive datetimes stored in SQLite with no timezone annotation. Code comparing these timestamps to `datetime.now()` (local time) or `datetime.now(timezone.utc)` will silently produce incorrect deltas.
 
-**Fix:** Assert the registration succeeds:
+**Fix:** Replace all occurrences with `datetime.now(timezone.utc)` and add `timezone` to the import:
 
 ```python
-reg_response = await client.post("/workflows", json=COMP_WORKFLOW)
-assert reg_response.status_code in (200, 201), f"Workflow registration failed: {reg_response.text}"
+from datetime import datetime, timezone
+
+# Everywhere datetime.utcnow() appears:
+datetime.now(timezone.utc)
+```
+
+Note: SQLAlchemy `DateTime` without `timezone=True` stores the value without TZ info regardless. Either use `DateTime(timezone=True)` on all timestamp columns or document that all values are UTC-naive by convention.
+
+---
+
+### WR-02: `run.completed_at` is committed twice — once in `executor.py` and again in `compensator.py` — with no comment explaining the intentional override
+
+**File:** `app/runs/executor.py:100`, `app/runs/compensator.py:104`
+
+**Issue:** When a step fails, `executor.py` commits `run.completed_at = datetime.utcnow()` at line 100 alongside `run.status = "FAILED"`. Then `compensate()` sets `run.completed_at = datetime.utcnow()` again at line 104 of `compensator.py` when writing the final `COMPENSATED` / `COMPENSATION_FAILED` status. The second write is semantically correct (the compensator timestamp is the true terminal time), but the pattern is confusing — a future developer might remove the second assignment believing `completed_at` was already set, breaking the terminal timestamp for compensated runs. The first `completed_at` assignment in executor.py is also technically premature because the run is not truly complete at the point of step failure — compensation still needs to run.
+
+**Fix:** Remove `run.completed_at` from the failure commit in `executor.py` and let `compensate()` be the sole setter for `completed_at` on failure paths. Add a comment in `compensator.py` making this explicit:
+
+```python
+# compensator.py:104 — this is the authoritative terminal timestamp for all failure paths
+run.completed_at = datetime.now(timezone.utc)
+```
+
+And in `executor.py`, remove `run.completed_at = datetime.utcnow()` from the FAILED commit blocks (lines 100 and 110), setting it only in the COMPLETED path (line 119) or deferring it entirely to the compensator for failure paths.
+
+---
+
+### WR-03: Workflow registration not asserted in any compensation test — silent 409 breaks subsequent assertions at the wrong layer
+
+**File:** `tests/test_compensation.py:42,60,87,109,131,145`
+
+**Issue:** Every test calls `await client.post("/workflows", json=COMP_WORKFLOW)` and discards the return value. Each test relies on the `test_engine` fixture (function-scoped) to provide an empty database, so the first run succeeds. If the fixture scope is ever changed, or if the registration endpoint returns a non-success status for any reason, the subsequent `POST /workflows/comp-wf/runs` will return 404 and `response.json()["run_id"]` will raise `KeyError` — the failure message will implicate the run endpoint, not the registration step.
+
+**Fix:** Assert registration in every test:
+
+```python
+reg = await client.post("/workflows", json=COMP_WORKFLOW)
+assert reg.status_code in (200, 201), f"Workflow registration failed: {reg.status_code} {reg.text}"
 ```
 
 ---
 
-### WR-02: test_compensation_lifo_order does not assert compensation is complete before checking call_order
+### WR-04: `test_compensation_lifo_order` does not guard against empty `call_order` — a wiring failure produces a confusing assertion message
 
-**File:** `tests/test_compensation.py:77-82`
+**File:** `tests/test_compensation.py:80-82`
 
-**Issue:** The test exits the `async with respx.mock:` block at line 82 (implicitly, after `await client.post(...)`) and then asserts `call_order`. The comment at line 78 states "Compensation completes before post() returns" — this relies on ASGITransport completing all background tasks synchronously. If this invariant ever breaks (e.g., if the compensator spawns a new `asyncio.Task` rather than awaiting directly inside the `BackgroundTask`), `call_order` may be empty or partial at assertion time, producing a flaky test rather than a definitive failure. There is no assertion that compensation was triggered at all before checking order.
+**Issue:** The final assertion is `assert call_order == ["comp-b", "comp-a"]`. If the compensator is never invoked (e.g., executor wiring is missing, or `respx.mock` scope mismatch), `call_order` will be `[]` and the assertion message will be `Expected LIFO order [comp-b, comp-a], got []` — which does not distinguish "compensation never ran" from "compensation ran in the wrong order." A developer seeing `got []` will waste time chasing a mock or import issue rather than an ordering bug.
 
-**Fix:** Add an assertion that both entries are present before checking order, and add a guard for the empty case:
+**Fix:** Add a length assertion before the order assertion:
 
 ```python
 assert len(call_order) == 2, (
-    f"Expected 2 compensation calls, got {len(call_order)}: {call_order}. "
-    "Compensation may not have run — check executor wiring."
+    f"Expected 2 compensation calls but got {len(call_order)}: {call_order}. "
+    "Check that CompensationCoordinator is wired into execute_run."
 )
 assert call_order == ["comp-b", "comp-a"], (
     f"Expected LIFO order [comp-b, comp-a], got {call_order}"
@@ -123,46 +245,58 @@ assert call_order == ["comp-b", "comp-a"], (
 
 ---
 
-### WR-03: test_compensation_skips_steps_without_compensate_url has dead variable step_c that is never asserted
+### WR-05: `test_compensation_skips_steps_without_compensate_url` assigns `step_c` but never asserts on it — the no-compensate-url contract is untested
 
 **File:** `tests/test_compensation.py:120-126`
 
-**Issue:** `step_c` is fetched at line 120 with a default of `None` (`next((s for s in body if ...), None)`) but is never asserted on. The comment at lines 119-121 explains what the expected behavior is, but no assertion captures it. If the compensator incorrectly sets `compensation_status` on `step-c`, this test will not catch it. Additionally, the comment ("step-c completed before failing") contradicts the mock setup: `exec-c` returns 500 at line 112, so `step-c` actually **failed**, not completed.
+**Issue:** `step_c` is assigned at line 120 (with a `None` default) and then never used. The comment on lines 119–121 describes the expected behavior ("step-c has no compensate_url so its compensation_status is None"), but no assertion enforces it. If the compensator incorrectly sets `compensation_status` on step-c, this test will not catch it. Additionally, the comment "step-c completed before failing" is inaccurate: in this test's mock setup, `exec-c` returns HTTP 500, so step-c **failed** — it did not complete. Only `COMPLETED` steps are queried for compensation, so step-c is correctly excluded from the compensator's query regardless — but the comment creates confusion about why.
 
-**Fix:** Either assert that `step_c` has `compensation_status == None` (no compensation attempted on a failed step with no compensate_url), or assert it is absent from the response if the schema filters it:
+**Fix:**
 
 ```python
-# step-c failed (HTTP 500); it should not be compensated
+# step-c received HTTP 500 — it FAILED, so compensation is never attempted on it
 if step_c is not None:
     assert step_c["compensation_status"] is None, (
-        f"step-c should have no compensation_status, got {step_c['compensation_status']}"
+        f"step-c should have no compensation_status (it failed, not completed), "
+        f"got {step_c['compensation_status']}"
     )
 ```
-
-Also correct the misleading comment: `step-c` received a 500 response (it failed), it did not "complete before failing."
 
 ---
 
 ## Info
 
-### IN-01: Module-level import of non-existent symbol documents RED state as a code comment, but causes collection failure
+### IN-01: `RunResponse` exposes `workflow_def_id` but the POST endpoint returns a raw `{"run_id": str}` dict — API shape inconsistency is undocumented
 
-**File:** `tests/test_compensation.py:15`
+**File:** `app/runs/schemas.py:35-44`, `app/runs/router.py:39` (for context)
 
-**Issue:** The comment `# RED — does not exist yet` acknowledges this is a red-phase TDD import, but pytest will fail to collect the entire module with `ModuleNotFoundError` rather than skipping or xfailing individual tests. This means unrelated test failures will appear in CI even for test runs that don't target this file, if the test runner imports all test modules at collection time (which pytest does by default).
+**Issue:** `POST /workflows/{name}/runs` returns `{"run_id": run.id}` (a raw dict), not a `RunResponse`. `GET /runs/{run_id}` returns `RunResponse` which has an `id` field (not `run_id`). Tests use `response.json()["run_id"]` for the POST response, then `run_response.json()["id"]` would be needed for GET (though the tests only check `status`, not `id`). This inconsistency is a latent consumer-experience issue: callers using the POST response shape will expect `run_id`, but callers introspecting the OpenAPI spec for the GET schema will find `id`.
 
-**Fix:** Use a `pytest.importorskip` guard or a `try/except ImportError` at module level with a `pytestmark` to skip all tests in the file until the implementation exists:
+**Suggestion:** Either align the POST response to return `RunResponse` (with HTTP 201), or define a minimal `StartRunResponse` schema with `run_id: str` and use it as the POST response model. At minimum, add a docstring to the POST router handler noting the intentional shape difference.
+
+---
+
+### IN-02: `input_payload` field validator in `RunResponse` does not handle `json.JSONDecodeError` — malformed DB data raises unhandled 500
+
+**File:** `app/runs/schemas.py:46-51`
+
+**Issue:** `parse_input_payload` calls `json.loads(v)` on line 50 without a try/except. If `input_payload` is stored as a malformed JSON string in the database (e.g., due to a bug during write or direct DB manipulation), `json.loads()` will raise `json.JSONDecodeError`, which propagates through Pydantic validation and causes `GET /runs/{run_id}` to return HTTP 500 with an unhandled exception traceback. This is a data-integrity edge case, but the failure mode is opaque.
+
+**Suggestion:** Wrap the parse with error handling:
 
 ```python
-# At top of file, after other imports:
-compensator_mod = pytest.importorskip(
-    "app.runs.compensator",
-    reason="CompensationCoordinator not implemented yet",
-)
-CompensationCoordinator = compensator_mod.CompensationCoordinator
+@field_validator("input_payload", mode="before")
+@classmethod
+def parse_input_payload(cls, v: Any) -> dict | None:
+    if isinstance(v, str):
+        try:
+            return json.loads(v)
+        except json.JSONDecodeError:
+            return {"_raw": v, "_error": "malformed JSON in storage"}
+    return v
 ```
 
-This will skip all tests in the file rather than erroring at collection, which is the correct behavior for TDD red-phase tests.
+Or raise a `ValueError` with a clear message so Pydantic surfaces a 422 instead of a 500.
 
 ---
 
