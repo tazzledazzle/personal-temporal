@@ -4,3 +4,21 @@
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.coverage
+htmlcov/
+
+# Environment — contains secrets, never commit
+.env
+
+# SQLite WAL/SHM sidecar files
+*.db-wal
+*.db-shm
