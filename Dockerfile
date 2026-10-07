@@ -2,6 +2,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Upgrade pip and setuptools first — python:3.11-slim ships pip 24.x which
+# lacks setuptools.backends required by setuptools>=68 build-backend.
+RUN pip install --no-cache-dir --upgrade pip setuptools
+
 # Install dependencies first (layer caching)
 COPY pyproject.toml .
 RUN pip install --no-cache-dir ".[dev]"
