@@ -100,7 +100,7 @@ No new security surface introduced. Threat items from plan threat model:
 
 ## Checkpoint Status
 
-Task 3 is a `checkpoint:human-verify` gate requiring user verification before this plan is marked complete. See checkpoint details below.
+Task 3 was a `checkpoint:human-verify` gate. The checkpoint was approved by the user; plan 04-03 is complete.
 
 ## Self-Check
 

@@ -17,7 +17,7 @@
 - [ ] **Phase 1: Foundation & Persistence** - Async DB engine, WAL config, workflow definition CRUD, auth, health, structlog, test harness
 - [ ] **Phase 2: Execution Engine** - Happy-path run execution, per-step HTTP dispatch, run/step query endpoints, timeouts, retry schema
 - [x] **Phase 3: Saga Compensation** - CompensationCoordinator, LIFO reverse-order compensation, continue-on-failure, per-step compensation recording (completed 2026-10-07)
-- [ ] **Phase 4: Containerization & Integration Tests** - Dockerfile, docker-compose with named volume, end-to-end integration test suite
+- [x] **Phase 4: Containerization & Integration Tests** - Dockerfile, docker-compose with named volume, end-to-end integration test suite (completed 2026-10-07)
 
 ---
 
@@ -102,7 +102,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 04-03-PLAN.md — Wave 2: Integration test GREEN gate (make tests pass, human-verify checkpoint)
+- [x] 04-03-PLAN.md — Wave 2: Integration test GREEN gate (make tests pass, human-verify checkpoint)
 
 ---
 
@@ -113,7 +113,7 @@ Plans:
 | 1. Foundation & Persistence | 2/3 | In Progress|  |
 | 2. Execution Engine | 0/? | Not started | - |
 | 3. Saga Compensation | 2/2 | Complete    | 2026-10-07 |
-| 4. Containerization & Integration Tests | 2/3 | In Progress|  |
+| 4. Containerization & Integration Tests | 3/3 | Complete | 2026-10-07 |
 
 ---
 
