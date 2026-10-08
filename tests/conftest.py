@@ -1,39 +1,29 @@
 """
-Test infrastructure: in-memory SQLite engine with StaticPool, db_session,
-client (with X-API-Key header), and client_no_auth fixtures.
+Test infrastructure: temp-file SQLite engine with NullPool + WAL PRAGMAs,
+db_session, client (with X-API-Key), and client_no_auth fixtures.
 
-These fixtures import from app.* which does not yet exist — intentional RED gate.
-ImportError on collection is the expected Wave 1 state.
+The client fixture patches app.runs.executor.AsyncSessionLocal so the background
+executor uses the test DB instead of the production engine.
 """
 
 import os
 import tempfile
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
-from httpx import AsyncClient, ASGITransport
 
+from app.core.database import Base, get_db
 from app.main import app
-from app.core.database import get_db, Base
 
 TEST_API_KEY = "test-api-key"
 
 
 @pytest.fixture
-async def db_session():
-    """
-    Create a temp-file SQLite engine with NullPool so WAL mode is honoured.
-
-    SQLite in-memory databases always report journal_mode='memory' and ignore
-    the PRAGMA journal_mode=WAL directive — WAL requires a file.  Using a
-    NamedTemporaryFile gives us a real on-disk database for the test session
-    while keeping it isolated (the file is deleted in cleanup).
-
-    PRAGMAs are registered via event.listens_for(engine.sync_engine, "connect")
-    — the same pattern as production.
-    """
+async def test_engine():
+    """Shared async engine backed by a temp SQLite file. Exposed so fixtures can build session factories from it."""
     tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     tmp.close()
     db_url = f"sqlite+aiosqlite:///{tmp.name}"
@@ -56,22 +46,35 @@ async def db_session():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    TestSession = async_sessionmaker(
-        bind=engine, class_=AsyncSession, expire_on_commit=False
-    )
-    async with TestSession() as session:
-        yield session
+    yield engine
 
     await engine.dispose()
     os.unlink(tmp.name)
 
 
 @pytest.fixture
-async def client(db_session: AsyncSession):
+async def db_session(test_engine):
+    """Yields an AsyncSession for the test DB."""
+    TestSession = async_sessionmaker(bind=test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with TestSession() as session:
+        yield session
+
+
+@pytest.fixture
+async def client(test_engine, db_session):
     """
-    AsyncClient with X-API-Key header set to TEST_API_KEY.
-    Overrides the get_db dependency with the test session.
+    AsyncClient with X-API-Key header.
+
+    Patches two things:
+    1. app.dependency_overrides[get_db] — routes the request-scoped session to the test DB
+    2. app.runs.executor.AsyncSessionLocal — routes the background executor's session to the test DB
     """
+    import app.runs.executor as executor_module
+
+    TestSession = async_sessionmaker(bind=test_engine, class_=AsyncSession, expire_on_commit=False)
+    original_factory = getattr(executor_module, "AsyncSessionLocal", None)
+    executor_module.AsyncSessionLocal = TestSession
+
     async def override_get_db():
         yield db_session
 
@@ -82,15 +85,15 @@ async def client(db_session: AsyncSession):
         headers={"X-API-Key": TEST_API_KEY},
     ) as ac:
         yield ac
+
     app.dependency_overrides.clear()
+    if original_factory is not None:
+        executor_module.AsyncSessionLocal = original_factory
 
 
 @pytest.fixture
-async def client_no_auth(db_session: AsyncSession):
-    """
-    AsyncClient without X-API-Key header — for testing 401 responses.
-    Overrides the get_db dependency with the test session.
-    """
+async def client_no_auth(test_engine, db_session):
+    """AsyncClient without X-API-Key header — for testing 401 responses."""
     async def override_get_db():
         yield db_session
 
@@ -100,4 +103,5 @@ async def client_no_auth(db_session: AsyncSession):
         base_url="http://test",
     ) as ac:
         yield ac
+
     app.dependency_overrides.clear()
